@@ -1,0 +1,1398 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "version": "1.0",
+    "title": "RBKmoney Webhooks Events API",
+    "termsOfService": "http://rbkmoney.com/",
+    "contact": {
+      "name": "RBKmoney support team",
+      "email": "tech-support@rbkmoney.com",
+      "url": "https://api.rbk.money"
+    },
+    "description": "\n## Webhooks Events API\n\nДанная спецификация определяет протокол доставки оповещений о возникновении\nновых событий в рамках вашей организации, которые платформа доставляет в\nвиде HTTP-запросов на URL-адреса созданных вами webhook'ов. Обработчики для\nподобного рода запросов необходимо реализовать на стороне вашего серверного\nкода согласно данной спецификации.\n\nWebhook — это подписка на определенный тип события либо их группу,\nкасающихся различных объектов в рамках вашей организации. Для управления\nwebhook'ами используются методы RBKmoney API, описанные в спецификации\n[RBKmoney Webhooks Management API](https://rbkmoney.github.io/api#Webhooks).\nКогда наступает одно из событий в рамках определенного инвойса (например,\nизменение статуса инвойса или платежа по этому инвойсу), платформа выбирает\nwebhook, подходящий под этот тип события, и отправляет HTTP-запрос,\nсодержащий сообщение в формате JSON на указанный в этом webhook'е URL. Если\nвы создали несколько webhook'ов, подходящих под этот тип события, то событие\nдоставляется одновременно на все заданные в них URL в неопределённом\nпорядке.\n\n## Стратегия доставки\n\nПлатформа гарантирует порядок доставки событий в рамках определенного инвойса,\nникакое событие не может быть пропущено и доставлено не в порядке возникновения в платформе.\nПлатформа поддерживает очередь сообщений для каждого инвойса для того,\nчтобы соблюсти эти гарантии.\n\nЗапрос на доставку считается успешным только при получении ответа со\nстатусом `200`. Платформа будет ожидать успешного ответа на отправленный\nзапрос в течение 10 секунд. В случае ответа любым другим статусом или по\nистечении указанного времени, отведённого на обработку оповещения, платформа\nбудет пытаться повторно доставить оповещения до получения успешного ответа,\nлибо до принятия решения о невозможности доставить информацию. Попытки\nдоставки будут производиться со следующими временными интервалами между\nзапросами:\n\n  - 30 секунд,\n  - 5 минут,\n  - 15 минут,\n  - 1 час.\n  - каждый час в течение суток (24 часа)\n\nЕсли последняя попытка доставить оповещение оканчивается неудачей, все события, которые\nнакопились в очереди этого инвойса, отбрасываются.\n\n## Авторизация полученных сообщений\n\nПлатформа подтверждает подлинность оповещений, подписывая сообщения\nприватным ключом, уникальным для каждого webhook'а, парный публичный ключ к\nкоторому содержится в данных этого webhook'а. Подпись передается в\nHTTP-заголовке `Content-Signature`. В заголовке в виде различных атрибутов\nсодержится информация об использованном при формировании подписи алгоритме и\nзначение подписи в формате\n[URL-safe base-64](https://tools.ietf.org/html/rfc4648).\n\n```\nContent-Signature: alg=RS256; digest=zFuf7bRH4RHwyktaqHQwmX5rn3LfSb4dKo...\n```\n\nНа данный момент возможно использование единственного алоритма формирования\nподписи.\n\n### [RS256](https://tools.ietf.org/html/rfc7518#section-3.3)\n\nПодпись формируется согласно алгоритму\n[RSASSA-PKCS1-v1_5](https://tools.ietf.org/html/rfc3447#section-8.2), на\nвход которому подаётся результат вычисления хэша сообщения по алгоритму\n[SHA-256](https://tools.ietf.org/html/rfc6234).\n\nНабор атрибутов заголовка и список возможных алгоритмов формирования подписи\nв дальнейшем могут быть расширены.\n"
+  },
+  "schemes": [
+    "https"
+  ],
+  "consumes": [
+    "application/json; charset=utf-8"
+  ],
+  "produces": [
+    "application/json; charset=utf-8"
+  ],
+  "parameters": {
+    "signature": {
+      "name": "Content-Signature",
+      "in": "header",
+      "description": "Подпись сообщения, сформированная согласно указанным выше правилам\n",
+      "required": true,
+      "type": "string"
+    }
+  },
+  "tags": [
+    {
+      "name": "Event Notifications",
+      "x-displayName": "Оповещения",
+      "description": "Доставка оповещений о событиях платформы."
+    }
+  ],
+  "paths": {
+    "/webhook-url": {
+      "post": {
+        "tags": [
+          "Event Notifications"
+        ],
+        "summary": "Оповестить о событии",
+        "operationId": "notifyWebhookEvent",
+        "parameters": [
+          {
+            "$ref": "#/parameters/signature"
+          },
+          {
+            "in": "body",
+            "name": "event",
+            "description": "Данные произошедшего в платформе события",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/Event"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Оповещение обработано"
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "BankCardDetails": {
+      "required": [
+        "bin",
+        "lastDigits",
+        "cardNumberMask",
+        "paymentSystem"
+      ],
+      "properties": {
+        "bin": {
+          "description": "БИН банка-эмитента карты",
+          "type": "string",
+          "pattern": "^\\d{6,8}$"
+        },
+        "lastDigits": {
+          "description": "Последние цифры номера карты",
+          "type": "string",
+          "pattern": "^\\d{2,4}$"
+        },
+        "cardNumberMask": {
+          "description": "Маскированый номер карты",
+          "type": "string",
+          "pattern": "^\\d{6,8}\\*+\\d{2,4}$"
+        },
+        "paymentSystem": {
+          "description": "Платежная система",
+          "type": "string",
+          "maxLength": 100
+        },
+        "tokenProvider": {
+          "description": "Провайдер платежных токенов",
+          "type": "string",
+          "enum": [
+            "applepay",
+            "googlepay",
+            "samsungpay",
+            "yandexpay"
+          ]
+        },
+        "issuerCountry": {
+          "description": "Страна эмитент (alpha-3 код по стандарту ISO_3166-1)",
+          "type": "string",
+          "example": [
+            "RUS",
+            "POL",
+            "USA"
+          ]
+        },
+        "bankName": {
+          "description": "Наименование банка",
+          "type": "string",
+          "example": [
+            "SBERBANK OF RUSSIA",
+            "JOINT STOCK COMPANY ALFA-BANK",
+            "VTB BANK OJSC"
+          ]
+        }
+      }
+    },
+    "ClientInfo": {
+      "description": "Данные клиентского устройства плательщика",
+      "type": "object",
+      "required": [
+        "fingerprint"
+      ],
+      "properties": {
+        "ip": {
+          "description": "IP-адрес плательщика",
+          "type": "string",
+          "format": "ip-address",
+          "maxLength": 45
+        },
+        "fingerprint": {
+          "description": "Уникальный отпечаток user agent'а плательщика",
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
+    "ContactInfo": {
+      "description": "Контактные данные плательщика",
+      "type": "object",
+      "properties": {
+        "email": {
+          "description": "Адрес электронной почты",
+          "type": "string",
+          "format": "email",
+          "maxLength": 100
+        },
+        "phoneNumber": {
+          "description": "Номер мобильного телефона с международным префиксом согласно\n[E.164](https://en.wikipedia.org/wiki/E.164).\n",
+          "type": "string",
+          "format": "^\\+\\d{4,15}$"
+        }
+      }
+    },
+    "CryptoCurrency": {
+      "description": "Тип криптовалюты",
+      "type": "string",
+      "enum": [
+        "bitcoin",
+        "litecoin",
+        "bitcoinCash",
+        "ripple",
+        "ethereum",
+        "zcash"
+      ]
+    },
+    "CryptoWalletDetails": {
+      "required": [
+        "cryptoCurrency"
+      ],
+      "properties": {
+        "cryptoCurrency": {
+          "$ref": "#/definitions/CryptoCurrency"
+        }
+      }
+    },
+    "Customer": {
+      "description": "Данные плательщика",
+      "type": "object",
+      "required": [
+        "id",
+        "shopID",
+        "status",
+        "contactInfo",
+        "metadata"
+      ],
+      "properties": {
+        "id": {
+          "description": "Идентификатор плательщика",
+          "type": "string"
+        },
+        "shopID": {
+          "description": "Идентификатор магазина",
+          "type": "string"
+        },
+        "status": {
+          "description": "Статус плательщика",
+          "type": "string",
+          "enum": [
+            "ready",
+            "unready"
+          ]
+        },
+        "contactInfo": {
+          "$ref": "#/definitions/ContactInfo"
+        },
+        "metadata": {
+          "description": "Связанные с плательщиком метаданные",
+          "type": "object"
+        }
+      }
+    },
+    "CustomerBinding": {
+      "description": "Привязка плательщика к платежному средству",
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CustomerBindingStatus"
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "paymentResource"
+          ],
+          "properties": {
+            "id": {
+              "description": "Идентификатор привязки",
+              "type": "string"
+            },
+            "paymentResource": {
+              "$ref": "#/definitions/PaymentResource"
+            }
+          }
+        }
+      ]
+    },
+    "CustomerBindingError": {
+      "description": "Описание ошибки, возникшей в процессе привязки",
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "CustomerBindingFailed": {
+      "description": "Событие о неуспешной привязке плательщика к платежному средству",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "customer",
+            "binding"
+          ],
+          "properties": {
+            "customer": {
+              "$ref": "#/definitions/Customer"
+            },
+            "binding": {
+              "$ref": "#/definitions/CustomerBinding"
+            }
+          }
+        }
+      ]
+    },
+    "CustomerBindingStarted": {
+      "description": "Событие о создании привязки плательщика к платежному средству",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "customer",
+            "binding"
+          ],
+          "properties": {
+            "customer": {
+              "$ref": "#/definitions/Customer"
+            },
+            "binding": {
+              "$ref": "#/definitions/CustomerBinding"
+            }
+          }
+        }
+      ]
+    },
+    "CustomerBindingStatus": {
+      "description": "Статус привязки плательщика к платежному средству",
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "description": "Статус привязки",
+          "type": "string",
+          "enum": [
+            "pending",
+            "succeeded",
+            "failed"
+          ]
+        },
+        "error": {
+          "$ref": "#/definitions/CustomerBindingError"
+        }
+      }
+    },
+    "CustomerBindingSucceeded": {
+      "description": "Событие об успешной привязке плательщика к платежному средству",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "customer",
+            "binding"
+          ],
+          "properties": {
+            "customer": {
+              "$ref": "#/definitions/Customer"
+            },
+            "binding": {
+              "$ref": "#/definitions/CustomerBinding"
+            }
+          }
+        }
+      ]
+    },
+    "CustomerCreated": {
+      "description": "Событие о создании нового плательщика",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "customer"
+          ],
+          "properties": {
+            "customer": {
+              "$ref": "#/definitions/Customer"
+            }
+          }
+        }
+      ]
+    },
+    "CustomerDeleted": {
+      "description": "Событие об удалении плательщика",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "customer"
+          ],
+          "properties": {
+            "customer": {
+              "$ref": "#/definitions/Customer"
+            }
+          }
+        }
+      ]
+    },
+    "CustomerPayer": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Payer"
+        },
+        {
+          "type": "object",
+          "required": [
+            "customerID"
+          ],
+          "properties": {
+            "customerID": {
+              "description": "Идентификатор плательщика",
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "CustomerReady": {
+      "description": "Событие о наступлении готовности плательщика к проведению оплаты",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "customer"
+          ],
+          "properties": {
+            "customer": {
+              "$ref": "#/definitions/Customer"
+            }
+          }
+        }
+      ]
+    },
+    "DigitalWalletDetails": {
+      "discriminator": "digitalWalletDetailsType",
+      "required": [
+        "digitalWalletDetailsType"
+      ],
+      "properties": {
+        "digitalWalletDetailsType": {
+          "type": "string",
+          "enum": [
+            "DigitalWalletDetailsQIWI"
+          ]
+        }
+      }
+    },
+    "DigitalWalletDetailsQIWI": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/DigitalWalletDetails"
+        },
+        {
+          "type": "object",
+          "required": [
+            "phoneNumberMask"
+          ],
+          "properties": {
+            "phoneNumberMask": {
+              "type": "string",
+              "description": "Маскированный номер телефона плательщика в международном формате, выступающий\nв роли идентификатора кошелька Visa QIWI Wallet.\n",
+              "pattern": "^\\+\\d\\*{1,10}\\d{2,4}$",
+              "example": "+7******3210"
+            }
+          }
+        }
+      ]
+    },
+    "Event": {
+      "description": "Данные события",
+      "type": "object",
+      "discriminator": "eventType",
+      "required": [
+        "eventID",
+        "occuredAt",
+        "topic",
+        "eventType"
+      ],
+      "properties": {
+        "eventID": {
+          "description": "Идентификатор события в системе",
+          "type": "integer"
+        },
+        "occuredAt": {
+          "description": "Дата и время возникновения события",
+          "type": "string",
+          "format": "date-time"
+        },
+        "topic": {
+          "description": "Предмет оповещения",
+          "type": "string",
+          "enum": [
+            "InvoicesTopic",
+            "CustomersTopic"
+          ]
+        },
+        "eventType": {
+          "type": "string",
+          "description": "Тип произошедшего с предметом оповещения события",
+          "enum": [
+            "InvoiceCreated",
+            "InvoicePaid",
+            "InvoiceCancelled",
+            "InvoiceFulfilled",
+            "PaymentStarted",
+            "PaymentProcessed",
+            "PaymentCaptured",
+            "PaymentCancelled",
+            "PaymentRefunded",
+            "PaymentFailed",
+            "RefundCreated",
+            "RefundPending",
+            "RefundSucceeded",
+            "RefundFailed",
+            "CustomerCreated",
+            "CustomerDeleted",
+            "CustomerReady",
+            "CustomerBindingStarted",
+            "CustomerBindingSucceeded",
+            "CustomerBindingFailed"
+          ]
+        }
+      }
+    },
+    "Invoice": {
+      "description": "Данные инвойса",
+      "type": "object",
+      "required": [
+        "id",
+        "shopID",
+        "createdAt",
+        "status",
+        "dueDate",
+        "amount",
+        "currency",
+        "metadata",
+        "product"
+      ],
+      "properties": {
+        "id": {
+          "description": "Идентификатор инвойса",
+          "type": "string"
+        },
+        "shopID": {
+          "description": "Идентификатор магазина",
+          "type": "string",
+          "format": "string"
+        },
+        "createdAt": {
+          "description": "Дата и время создания",
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "description": "Статус инвойса",
+          "type": "string",
+          "enum": [
+            "unpaid",
+            "cancelled",
+            "paid",
+            "refunded",
+            "fulfilled"
+          ]
+        },
+        "reason": {
+          "description": "Причина отмены или погашения инвойса",
+          "type": "string"
+        },
+        "dueDate": {
+          "description": "Дата и время истечения срока жизни",
+          "type": "string",
+          "format": "date-time"
+        },
+        "amount": {
+          "description": "Стоимость предлагаемых товаров или услуг, в минорных денежных единицах,\nнапример в копейках в случае указания российских рублей в качестве валюты.\n",
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        },
+        "currency": {
+          "description": "Валюта, символьный код согласно\n[RFC 4217](http://www.iso.org/iso/home/standards/currency_codes.htm).\n",
+          "type": "string"
+        },
+        "metadata": {
+          "description": "Связанные с инвойсом метаданные",
+          "type": "object"
+        },
+        "product": {
+          "description": "Наименование предлагаемых товаров или услуг",
+          "type": "string"
+        },
+        "description": {
+          "description": "Описание предлагаемых товаров или услуг",
+          "type": "string"
+        },
+        "cart": {
+          "description": "Корзина с набором позиций продаваемых товаров или услуг\n",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/InvoiceCartLine"
+          }
+        }
+      }
+    },
+    "InvoiceCancelled": {
+      "description": "Событие об отмене инвойса с указанием причины, например истечение его срока\nжизни\n",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "invoice"
+          ],
+          "properties": {
+            "invoice": {
+              "$ref": "#/definitions/Invoice"
+            }
+          }
+        }
+      ]
+    },
+    "InvoiceCartLine": {
+      "description": "Позиция товара или услуги",
+      "type": "object",
+      "required": [
+        "product",
+        "quantity",
+        "price",
+        "cost"
+      ],
+      "properties": {
+        "product": {
+          "description": "Описание предлагаемого товара или услуги",
+          "type": "string",
+          "maxLength": 1000
+        },
+        "quantity": {
+          "description": "Количество единиц товаров или услуг, предлагаемых на продажу в этой\nпозиции\n",
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "default": 1
+        },
+        "price": {
+          "description": "Цена предлагаемого товара или услуги, в минорных денежных единицах, например\nв копейках в случае указания российских рублей в качестве валюты\n",
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        },
+        "cost": {
+          "description": "Суммарная стоимость позиции с учётом количества единиц товаров или услуг\n",
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        },
+        "taxMode": {
+          "description": "Схема налогообложения предлагаемого товара или услуги. Указывается, только если предлагаемый товар или услуга облагается налогом.",
+          "type": "object",
+          "required": [
+            "rate"
+          ],
+          "properties": {
+            "rate": {
+              "description": "Ставка НДС",
+              "type": "string",
+              "enum": [
+                "0%",
+                "10%",
+                "18%",
+                "20%",
+                "10/110",
+                "18/118",
+                "20/120"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "InvoiceCreated": {
+      "description": "Событие о создании нового инвойса",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "invoice"
+          ],
+          "properties": {
+            "invoice": {
+              "$ref": "#/definitions/Invoice"
+            }
+          }
+        }
+      ]
+    },
+    "InvoiceFulfilled": {
+      "description": "Событие о погашении обязательств по инвойсу",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "invoice"
+          ],
+          "properties": {
+            "invoice": {
+              "$ref": "#/definitions/Invoice"
+            }
+          }
+        }
+      ]
+    },
+    "InvoicePaid": {
+      "description": "Событие о полной оплате инвойса, являющееся поводом начать предоставление\nплательщику товаров или услуг\n",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "invoice"
+          ],
+          "properties": {
+            "invoice": {
+              "$ref": "#/definitions/Invoice"
+            }
+          }
+        }
+      ]
+    },
+    "MobileCommerceDetails": {
+      "required": [
+        "phoneNumber"
+      ],
+      "properties": {
+        "phoneNumber": {
+          "description": "Маскированый номер мобильного телефона",
+          "type": "string",
+          "pattern": "^\\+\\d\\*{1,10}\\d{2,4}$",
+          "example": "+7******0102"
+        }
+      }
+    },
+    "Payer": {
+      "type": "object",
+      "discriminator": "payerType",
+      "required": [
+        "payerType"
+      ],
+      "properties": {
+        "payerType": {
+          "description": "Тип платежного средства",
+          "type": "string",
+          "enum": [
+            "CustomerPayer",
+            "PaymentResourcePayer",
+            "RecurrentPayer"
+          ]
+        }
+      }
+    },
+    "Payment": {
+      "description": "Данные платежа в рамках инвойса",
+      "type": "object",
+      "required": [
+        "id",
+        "createdAt",
+        "status",
+        "amount",
+        "currency",
+        "paymentSession",
+        "contactInfo",
+        "payer"
+      ],
+      "properties": {
+        "id": {
+          "description": "Идентификатор платежа",
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "Дата и время создания",
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "description": "Статус платежа",
+          "type": "string",
+          "enum": [
+            "pending",
+            "processed",
+            "captured",
+            "cancelled",
+            "refunded",
+            "failed"
+          ]
+        },
+        "error": {
+          "$ref": "#/definitions/PaymentError"
+        },
+        "amount": {
+          "description": "Стоимость предлагаемых товаров или услуг, в минорных денежных единицах, например в копейках в случае указания российских рублей в качестве валюты.\n",
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        },
+        "currency": {
+          "description": "Валюта, символьный код согласно\n[RFC 4217](http://www.iso.org/iso/home/standards/currency_codes.htm).\n",
+          "type": "string"
+        },
+        "metadata": {
+          "description": "Связанные с платежом метаданные",
+          "type": "object"
+        },
+        "paymentToolToken": {
+          "description": "**Deprecated.** _Используйте свойство `payer`._\nТокен платежного средства, предоставленного плательщиком\n",
+          "type": "string"
+        },
+        "paymentSession": {
+          "description": "**Deprecated.** _Используйте свойство `payer`._\nИдентификатор платежной сессии\n",
+          "type": "string"
+        },
+        "contactInfo": {
+          "description": "**Deprecated.** _Используйте свойство `payer`._\nКонтактные данные плательщика\n",
+          "type": "object",
+          "properties": {
+            "email": {
+              "description": "Адрес электронной почты",
+              "type": "string"
+            },
+            "phoneNumber": {
+              "description": "Номер мобильного телефона",
+              "type": "string"
+            }
+          }
+        },
+        "ip": {
+          "description": "**Deprecated.** _Используйте свойство `payer`._\nIP-адрес плательщика\n",
+          "type": "string"
+        },
+        "fingerprint": {
+          "description": "**Deprecated.** _Используйте свойство `payer`._\nУникальный отпечаток user agent'а плательщика\n",
+          "type": "string"
+        },
+        "payer": {
+          "$ref": "#/definitions/Payer"
+        },
+        "fee": {
+          "description": "Комиссия системы, в минорных денежных единицах.\n",
+          "type": "integer",
+          "format": "int64"
+        },
+        "rrn": {
+          "description": "Уникальный номер транзакции в системе авторизации и расчетов обслуживающего банка\n",
+          "type": "string"
+        }
+      }
+    },
+    "PaymentCancelled": {
+      "description": "Событие об отмене платежа, в результате которого списание денежных средств с\nплательщика аннулируется\n",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "invoice",
+            "payment"
+          ],
+          "properties": {
+            "invoice": {
+              "$ref": "#/definitions/Invoice"
+            },
+            "payment": {
+              "$ref": "#/definitions/Payment"
+            }
+          }
+        }
+      ]
+    },
+    "PaymentCaptured": {
+      "description": "Событие об успешном завершении платежа, что является подтверждением\nвозникновения денежных обязательств платформы перед вами\n",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "invoice",
+            "payment"
+          ],
+          "properties": {
+            "invoice": {
+              "$ref": "#/definitions/Invoice"
+            },
+            "payment": {
+              "$ref": "#/definitions/Payment"
+            }
+          }
+        }
+      ]
+    },
+    "PaymentError": {
+      "description": "[Ошибка, возникшая в процессе проведения платежа](#tag/Error-Codes)\n",
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "description": "Основной код ошибки",
+          "type": "string"
+        },
+        "message": {
+          "description": "**Deprecated.** _Используйте `subError` для детализации описания ошибки._\nОписание ошибки\n",
+          "type": "string"
+        },
+        "subError": {
+          "$ref": "#/definitions/SubError"
+        }
+      }
+    },
+    "PaymentFailed": {
+      "description": "Событие о неуспешном завершении платежа с указанием причины, например в\nслучае отсутствия достаточного количества денежных средств у плательщика\n",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "invoice",
+            "payment"
+          ],
+          "properties": {
+            "invoice": {
+              "$ref": "#/definitions/Invoice"
+            },
+            "payment": {
+              "$ref": "#/definitions/Payment"
+            }
+          }
+        }
+      ]
+    },
+    "PaymentProcessed": {
+      "description": "Событие об успешной обработке платежа",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "invoice",
+            "payment"
+          ],
+          "properties": {
+            "invoice": {
+              "$ref": "#/definitions/Invoice"
+            },
+            "payment": {
+              "$ref": "#/definitions/Payment"
+            }
+          }
+        }
+      ]
+    },
+    "PaymentRecurrentParent": {
+      "type": "object",
+      "description": "Родительский платеж, на основе которого создан текущий рекуррентный платеж",
+      "required": [
+        "invoiceID",
+        "paymentID"
+      ],
+      "properties": {
+        "invoiceID": {
+          "description": "Идентификатор инвойса",
+          "type": "string"
+        },
+        "paymentID": {
+          "description": "Идентификатор платежа",
+          "type": "string"
+        }
+      }
+    },
+    "PaymentRefunded": {
+      "description": "Событие об успешном осуществлении возврата платежа",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "invoice",
+            "payment"
+          ],
+          "properties": {
+            "invoice": {
+              "$ref": "#/definitions/Invoice"
+            },
+            "payment": {
+              "$ref": "#/definitions/Payment"
+            }
+          }
+        }
+      ]
+    },
+    "PaymentResource": {
+      "type": "object",
+      "description": "Данные платежного средства",
+      "required": [
+        "paymentSession",
+        "paymentToolToken"
+      ],
+      "properties": {
+        "paymentToolToken": {
+          "description": "Токен платежного средства, предоставленного плательщиком",
+          "type": "string",
+          "maxLength": 1000
+        },
+        "paymentSession": {
+          "description": "Идентификатор платежной сессии",
+          "type": "string",
+          "maxLength": 1000
+        },
+        "paymentToolDetails": {
+          "$ref": "#/definitions/PaymentToolDetails"
+        },
+        "clientInfo": {
+          "$ref": "#/definitions/ClientInfo"
+        }
+      }
+    },
+    "PaymentResourcePayer": {
+      "type": "object",
+      "description": "Платежное средство",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Payer"
+        },
+        {
+          "$ref": "#/definitions/PaymentResource"
+        },
+        {
+          "type": "object",
+          "required": [
+            "contactInfo"
+          ],
+          "properties": {
+            "contactInfo": {
+              "$ref": "#/definitions/ContactInfo"
+            }
+          }
+        }
+      ]
+    },
+    "PaymentStarted": {
+      "description": "Событие о запуске платежа в рамках инвойса",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "invoice",
+            "payment"
+          ],
+          "properties": {
+            "invoice": {
+              "$ref": "#/definitions/Invoice"
+            },
+            "payment": {
+              "$ref": "#/definitions/Payment"
+            }
+          }
+        }
+      ]
+    },
+    "PaymentTerminalDetails": {
+      "required": [
+        "provider"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "euroset",
+            "wechat",
+            "alipay",
+            "qps",
+            "uzcard"
+          ]
+        }
+      }
+    },
+    "PaymentToolDetails": {
+      "type": "object",
+      "discriminator": "detailsType",
+      "description": "Детали платежного средства",
+      "required": [
+        "detailsType"
+      ],
+      "properties": {
+        "detailsType": {
+          "description": "Тип информации о платежном средстве",
+          "type": "string",
+          "enum": [
+            "PaymentToolDetailsBankCard",
+            "PaymentToolDetailsPaymentTerminal",
+            "PaymentToolDetailsDigitalWallet",
+            "PaymentToolDetailsCryptoWallet",
+            "PaymentToolDetailsMobileCommerce"
+          ]
+        }
+      }
+    },
+    "PaymentToolDetailsBankCard": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/definitions/PaymentToolDetails"
+        },
+        {
+          "$ref": "#/definitions/BankCardDetails"
+        }
+      ]
+    },
+    "PaymentToolDetailsCryptoWallet": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/definitions/PaymentToolDetails"
+        },
+        {
+          "$ref": "#/definitions/CryptoWalletDetails"
+        }
+      ]
+    },
+    "PaymentToolDetailsDigitalWallet": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/definitions/PaymentToolDetails"
+        },
+        {
+          "$ref": "#/definitions/DigitalWalletDetails"
+        }
+      ]
+    },
+    "PaymentToolDetailsMobileCommerce": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/definitions/PaymentToolDetails"
+        },
+        {
+          "$ref": "#/definitions/MobileCommerceDetails"
+        }
+      ]
+    },
+    "PaymentToolDetailsPaymentTerminal": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/definitions/PaymentToolDetails"
+        },
+        {
+          "$ref": "#/definitions/PaymentTerminalDetails"
+        }
+      ]
+    },
+    "RecurrentPayer": {
+      "type": "object",
+      "description": "Многоразовое платежное средство на основе другого платежа",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Payer"
+        },
+        {
+          "type": "object",
+          "required": [
+            "contactInfo",
+            "recurrentParentPayment"
+          ],
+          "properties": {
+            "contactInfo": {
+              "$ref": "#/definitions/ContactInfo"
+            },
+            "recurrentParentPayment": {
+              "$ref": "#/definitions/PaymentRecurrentParent"
+            }
+          }
+        }
+      ]
+    },
+    "Refund": {
+      "description": "Данные рефанда в рамках платежа",
+      "type": "object",
+      "required": [
+        "id",
+        "createdAt",
+        "status",
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "id": {
+          "description": "Идентификатор рефанда",
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "Дата и время создания",
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "description": "Статус рефанда",
+          "type": "string",
+          "enum": [
+            "pending",
+            "succeeded",
+            "failed"
+          ]
+        },
+        "error": {
+          "description": "Описание ошибки, возникшей в процессе проведения рефанда, в случае\nесли рефанд завершился неуспешно\n",
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "amount": {
+          "description": "Возвращаемая сумма, в минорных денежных единицах, например в копейках в случае указания российских рублей в качестве валюты.\n",
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        },
+        "currency": {
+          "description": "Валюта, символьный код согласно\n[RFC 4217](http://www.iso.org/iso/home/standards/currency_codes.htm).\n",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Причина возврата",
+          "type": "string"
+        },
+        "rrn": {
+          "description": "Уникальный номер транзакции в системе авторизации и расчетов обслуживающего банка\n",
+          "type": "string"
+        }
+      }
+    },
+    "RefundCreated": {
+      "description": "Событие о запуске рефанда в рамках платежа",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "invoice",
+            "payment",
+            "refund"
+          ],
+          "properties": {
+            "invoice": {
+              "$ref": "#/definitions/Invoice"
+            },
+            "payment": {
+              "$ref": "#/definitions/Payment"
+            },
+            "refund": {
+              "$ref": "#/definitions/Refund"
+            }
+          }
+        }
+      ]
+    },
+    "RefundFailed": {
+      "description": "Событие о неуспешном завершении рефанда",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "invoice",
+            "payment",
+            "refund"
+          ],
+          "properties": {
+            "invoice": {
+              "$ref": "#/definitions/Invoice"
+            },
+            "payment": {
+              "$ref": "#/definitions/Payment"
+            },
+            "refund": {
+              "$ref": "#/definitions/Refund"
+            }
+          }
+        }
+      ]
+    },
+    "RefundPending": {
+      "description": "Событие о статусе ожидания рефанда",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "invoice",
+            "payment",
+            "refund"
+          ],
+          "properties": {
+            "invoice": {
+              "$ref": "#/definitions/Invoice"
+            },
+            "payment": {
+              "$ref": "#/definitions/Payment"
+            },
+            "refund": {
+              "$ref": "#/definitions/Refund"
+            }
+          }
+        }
+      ]
+    },
+    "RefundSucceeded": {
+      "description": "Событие об успешном завершении рефанда",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Event"
+        },
+        {
+          "type": "object",
+          "required": [
+            "invoice",
+            "payment",
+            "refund"
+          ],
+          "properties": {
+            "invoice": {
+              "$ref": "#/definitions/Invoice"
+            },
+            "payment": {
+              "$ref": "#/definitions/Payment"
+            },
+            "refund": {
+              "$ref": "#/definitions/Refund"
+            }
+          }
+        }
+      ]
+    },
+    "SubError": {
+      "description": "Детализация описания ошибки",
+      "type": "object",
+      "required": [
+        "code"
+      ],
+      "properties": {
+        "code": {
+          "description": "Детализация кода ошибки",
+          "type": "string"
+        },
+        "subError": {
+          "$ref": "#/definitions/SubError"
+        }
+      }
+    }
+  }
+}
